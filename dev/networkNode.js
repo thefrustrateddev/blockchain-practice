@@ -8,41 +8,84 @@ const bitcoin = new Blockchain();
 
 const port = process.argv[3];
 
-console.log('port',port)
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({extended:true}))
 
 app.get('/blockchain',(req,res)=>{
-
     res.send(bitcoin);
 });
 
 app.post('/transaction',(req,res)=>{
-    blockIndex = bitcoin.createNewTransaction(req.body.amount, req.body.sender, req.body.recipient);
+    const blockIndex = bitcoin.addNewTransaction(req.body.transactionObj);
     res.send(`Transaction will be added in block ${blockIndex}`);
 });
 
-app.get('/mine',(req,res)=>{
+app.post('/transaction/broadcast',async (req,res)=>{
+    const transactionObj = bitcoin.createNewTransaction(req.body.amount, req.body.sender, req.body.recipient);
+    const blockIndex = bitcoin.addNewTransaction(transactionObj);
+    let requestArray = []
+    for(let node in bitcoin.networkNodes){
+        requestArray.push(axios.post(`${bitcoin.networkNodes[node]}/transaction`,{
+            transactionObj
+        }))
+    }
+    const response = await axios.all(requestArray);
+    res.send(`Transaction will be added in block ${blockIndex}`);
+});
+
+app.get('/mine',async (req,res)=>{
     // nonce, previousBlockHash, hash
     const previousBlockHash = bitcoin.getLastBlock().hash;
     const currentBlockData = {
-        transaction: bitcoin.pendingTransactions,
+        transactions: bitcoin.pendingTransactions,
         index: bitcoin.getLastBlock().index+1
     }
     const nonce = bitcoin.proofOfWork(previousBlockHash,currentBlockData);
     const hash = bitcoin.hashBlock(previousBlockHash,currentBlockData,nonce);
 
-    bitcoin.createNewTransaction(12,'00',currentNodeAddress);
+    let newBlock = bitcoin.createNewBlock(nonce, previousBlockHash, hash);
 
-    const newBlock = bitcoin.createNewBlock(nonce, previousBlockHash, hash);
-    
+    let requestArray = []
+    // let requestTransactionArray = []
+    for(let node in bitcoin.networkNodes){
+        requestArray.push(axios.post(`${bitcoin.networkNodes[node]}/block/recieve`,{
+            newBlock
+        }))
+        // requestTransactionArray.push(axios.post(`${bitcoin.networkNodes[node]}/transaction`,{
+        //     amount:12,
+        //     sender:"00",
+        //     recipient:currentNodeAddress
+        // }))
+    }
+    const response = await axios.all(requestArray);
+    const transactionRes = await axios.post(`${bitcoin.currentNodeURL}/transaction/broadcast`,{
+        amount:12,
+        sender:"00",
+        recipient:currentNodeAddress
+    })
     res.json({
         note: `Block is mined successfully`,
         block: newBlock
     })
 });
+app.post('/block/recieve',(req,res)=>{
+    // need to add checks if its correct
+    // hashcheck and imndexCheck
+    const blockObj = req.body.newBlock;
+    if(bitcoin.getLastBlock().hash == blockObj.previousBlockHash && bitcoin.getLastBlock().index+1 == blockObj.index){
+        const newBlock = bitcoin.addNewBlock(blockObj)
+        return res.json({
+            note: `Block is mined successfully`,
+            block: newBlock
+        })
+    }
+    res.json({
+        note: `couldnt add block`,
+    })
+    
+})
 
 app.post('/register-broadcast-node',async (req,res)=>{
     // registers a node and broadcats it to entire network
@@ -53,7 +96,6 @@ app.post('/register-broadcast-node',async (req,res)=>{
         if(networkNodes.length>0){
             axiosList = []
             for(let nodeURL in networkNodes){
-                console.log('asdasdasdasd',`${networkNodes[nodeURL]}/register-node`)
                 axiosList.push(axios.post(
                     `${networkNodes[nodeURL]}/register-node`,
                     {
@@ -61,7 +103,9 @@ app.post('/register-broadcast-node',async (req,res)=>{
                     }
                 ))
             }
-            const res = axios.all(axiosList);
+            const response = axios.all(axiosList).catch((err)=>{
+                res.send('Adding node failed');
+            });
         }
         const networkNodeUrl = bitcoin.addNetworkNode(newNodeUrl);
 
@@ -72,7 +116,7 @@ app.post('/register-broadcast-node',async (req,res)=>{
                 networkNodes: [bitcoin.currentNodeURL,...networkNodes]
             }
         });
-        res.json({
+        return res.json({
             note: "networkNode has been added",
             networkNodeUrl
         })
@@ -92,7 +136,7 @@ app.post('/register-node',(req,res)=>{
     const newNodeUrl = req.body.newNodeUrl;
     if(bitcoin.networkNodes.indexOf(newNodeUrl)<0){
         const networkNodeUrl = bitcoin.addNetworkNode(newNodeUrl);
-        res.json({
+        return res.json({
             note: "networkNode has been added",
             networkNodeUrl
         })  
@@ -110,7 +154,44 @@ app.post('/register-bulk-nodes',(req,res)=>{
         note: "networkNodes has been added",
         networkNodes
     })
-})
+});
+
+app.get('/consensus',async(req,res)=>{
+    const networkNodes = bitcoin.networkNodes;
+    let requestArray = [];
+    for(nodes in networkNodes){
+        requestArray.push(axios.get(`${networkNodes[nodes]}/blockchain`));
+    }
+    const blockchains = await axios.all(requestArray);
+    let consentedBlockChain;
+    let validBlockChains=[];
+    // self check
+    if(bitcoin.chainIsValid(bitcoin.chain))validBlockChains.push(bitcoin);
+
+    blockchains.forEach((blockchain)=>{
+        // check valid then check longest
+        if(bitcoin.chainIsValid(blockchain.data.chain)) validBlockChains.push(blockchain.data);
+    });
+    sortedBlockchains = validBlockChains.sort((a,b)=>b.chain.length-a.chain.length);
+
+    consentedBlockChain = sortedBlockchains[0];
+    if(consentedBlockChain.currentNodeURL === bitcoin.currentNodeURL){
+        return res.json({
+            note:'current blockchian has not been replaced',
+            chain: bitcoin.chain
+        })
+    }
+
+    bitcoin.chain= consentedBlockChain.chain;
+    bitcoin.pendingTransactions= consentedBlockChain.pendingTransactions;
+
+    return res.json({
+        note:'current blockchian has been replaced',
+        chain: bitcoin.chain
+    })
+    
+    res.end()
+    })
 
 app.listen(port,()=>{
     console.log(`Listening on port: ${port}`)
