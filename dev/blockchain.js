@@ -94,6 +94,38 @@ class Blockchain{
                     blockchain[0].transactions.length!==0)) isValid=false
         return isValid
     }
+
+    getBlock(hash){
+        return this.chain.find((block)=>block.hash===hash)
+    }
+
+    getTransaction(transactionId){
+        let ctransaction,cblock;
+        this.chain.forEach((block)=>block.transactions.forEach((transaction)=>{
+            if(transaction.transactionId==transactionId){
+                cblock = block;
+                ctransaction = transaction
+            }
+        }))
+        return {
+            transaction:ctransaction,
+            block:cblock
+        }
+    }
+
+    getAddress(address){
+        let listOfTransaction=[],balance = 0;
+        this.chain.forEach((block)=>block.transactions.forEach((transaction)=>{
+            if(transaction.recipient==address || transaction.sender==address){
+                listOfTransaction.push(transaction);
+                transaction.recipient==address?balance+=transaction.amount:balance-=transaction.amount
+            }
+        }));
+        return{
+            transactions: listOfTransaction,
+            balance
+        }
+    }
 }
 
 module.exports=Blockchain;

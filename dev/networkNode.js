@@ -190,8 +190,39 @@ app.get('/consensus',async(req,res)=>{
         chain: bitcoin.chain
     })
     
-    res.end()
+});
+
+app.get('/block/:blockHash',(req,res)=>{
+    const blockHash = req.params.blockHash;
+    const block = bitcoin.getBlock(blockHash);
+    console.log({block})
+    res.json({
+        note: block?'The block has been retrieved.':'The block doesnt exist.',
+        block
     })
+})
+
+app.get('/transaction/:transactionId',(req,res)=>{
+    const transactionId = req.params.transactionId;
+    const transaction = bitcoin.getTransaction(transactionId);
+    console.log({transaction})
+    res.json({
+        note: transaction?'The transaction has been retrieved.':'The transaction doesnt exist.',
+        transaction
+    })
+})
+
+app.get('/address/:addressId',(req,res)=>{
+    const addressId = req.params.addressId;
+    const addressData = bitcoin.getAddress(addressId);
+    res.json({
+        addressData
+    })
+})
+
+app.get('/block-explorer', function(req, res) {
+	res.sendFile('./block-explorer/index.html', { root: __dirname });
+});
 
 app.listen(port,()=>{
     console.log(`Listening on port: ${port}`)
