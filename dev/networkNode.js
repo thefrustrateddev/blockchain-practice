@@ -224,6 +224,10 @@ app.get('/block-explorer', function(req, res) {
 	res.sendFile('./block-explorer/index.html', { root: __dirname });
 });
 
+app.get('/architecture', function(req, res) {
+	res.sendFile('../design/index.html', { root: __dirname });
+});
+
 app.listen(port,()=>{
     console.log(`Listening on port: ${port}`)
 })
